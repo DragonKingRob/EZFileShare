@@ -155,7 +155,7 @@ def handle_file_transfer(conn, addr, current_dir, log_callback):
             actual_checksum = zlib.crc32(file_data)
 
         if actual_checksum == expected_checksum:
-            transfer_logger.log_transfer(
+            Transfer_Logger.log_transfer(
                 event_type="receive",
                 filename=filename,
                 host=addr[0],
@@ -165,7 +165,7 @@ def handle_file_transfer(conn, addr, current_dir, log_callback):
             )
             log_callback(f"File {filename} received successfully at {file_path} (Checksum verified).")
         else:
-            transfer_logger.log_transfer(
+            Transfer_Logger.log_transfer(
                 event_type="receive",
                 filename=filename,
                 host=addr[0],
@@ -263,7 +263,7 @@ def client(username, filename, client_log_callback, recipient_username):
 
                     # Send EOF marker explicitly
                     secure_sock.sendall(b"EOF")
-                    transfer_logger.log_transfer(
+                    Transfer_Logger.log_transfer(
                         event_type="send",
                         filename=os.path.basename(filename),
                         host=recipient_ip,
