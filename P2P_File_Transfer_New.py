@@ -12,7 +12,7 @@ import stat
 from dataclasses import dataclass
 import requests
 import upnpy
-from transfer_logger import TransferHistoryViewer, transfer_logger
+from Transfer_Logger import TransferHistoryViewer, Transfer_Logger
 
 
 # Constants
