@@ -12,6 +12,7 @@ import stat
 from dataclasses import dataclass
 import requests
 import upnpy
+from transfer_logger import TransferHistoryViewer, transfer_logger
 
 
 # Constants
@@ -64,19 +65,12 @@ def send_to_server(endpoint, username, password, identifier, ip, port):
         print(f"Client error: {e}")
         return f"Error: {e}"
 
-
-
-
 def create_tls_context():
     """Creates a TLS context."""
     context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     context.load_cert_chain(certfile=CERTFILE, keyfile=KEYFILE)
     return context
 
-#create tls context
-#wait for incoming connection
-#send cert
-#accept incoming connection
 def server(host, port, command_queue, server_log_callback):
     """Runs the P2P server with a command queue for dynamic behavior."""
     context = create_tls_context()
@@ -124,13 +118,11 @@ def handle_file_transfer(conn, addr, current_dir, log_callback):
         # Wait for "CLIENT-READY" signal
         client_ready_signal = conn.recv(BUFFER_SIZE).decode("utf-8")
         
-
         if client_ready_signal != "CLIENT-READY":
             log_callback(f"Unexpected signal from client: {client_ready_signal}")
             return
 
         log_callback(f"[SERVER][RECIPIANT] Client Ready...")
-
 
         # Send readiness signal to client
         payload = "SERVER-READY"
@@ -163,8 +155,28 @@ def handle_file_transfer(conn, addr, current_dir, log_callback):
             actual_checksum = zlib.crc32(file_data)
 
         if actual_checksum == expected_checksum:
+            transfer_logger.log_transfer(
+                event_type="receive",
+                filename=filename,
+                host=addr[0],
+                port=addr[1],
+                status="success",
+                additional_info={"checksum": actual_checksum}
+            )
             log_callback(f"File {filename} received successfully at {file_path} (Checksum verified).")
         else:
+            transfer_logger.log_transfer(
+                event_type="receive",
+                filename=filename,
+                host=addr[0],
+                port=addr[1],
+                status="failed",
+                additional_info={
+                    "error": "checksum_mismatch",
+                    "expected": expected_checksum,
+                    "actual": actual_checksum
+                }
+            )
             log_callback(f"Checksum mismatch for {filename}! Expected: {expected_checksum}, Got: {actual_checksum}")
     except Exception as e:
         log_callback(f"Error during file transfer: {e}")
@@ -176,7 +188,6 @@ def handle_client_cert_exchange(conn, addr, current_dir, log_callback):
         with open('cert.pem', 'r') as file:
             payload = file.read()
 
-        
         conn.sendall(payload.encode('utf-8'))
         log_callback(f"[SERVER] Certificate sent to {addr}. Closing connection to auth server")
         #####################################
@@ -218,7 +229,6 @@ def client(username, filename, client_log_callback, recipient_username):
         with open('client_cert.pem', 'w') as file:
             file.write(response)
 
-
         context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
         context.load_verify_locations(cafile="client_cert.pem")
         context.check_hostname = False
@@ -251,8 +261,16 @@ def client(username, filename, client_log_callback, recipient_username):
                     while chunk := f.read(BUFFER_SIZE):
                         secure_sock.sendall(chunk)
 
-                      # Send EOF marker explicitly
+                    # Send EOF marker explicitly
                     secure_sock.sendall(b"EOF")
+                    transfer_logger.log_transfer(
+                        event_type="send",
+                        filename=os.path.basename(filename),
+                        host=recipient_ip,
+                        port=recipient_port,
+                        status="success",
+                        additional_info={"checksum": checksum}
+                    )
                     client_log_callback(f"File {filename} sent successfully.")
 
     except socket.timeout:
@@ -354,6 +372,10 @@ class P2PApp:
 
         self.draw_login_tab()
 
+    def show_history(self):
+        """Opens the transfer history viewer window"""
+        TransferHistoryViewer(self.root)
+
     def draw_login_tab(self):
         for widget in self.login_tab.winfo_children():
             widget.destroy()
@@ -399,6 +421,14 @@ class P2PApp:
         if self.user_state.logged_in == True:
             ctk.CTkButton(self.file_sharing_tab, text="Start", command=self.start_server).grid(row=2, column=0, padx=10, pady=5)
             ctk.CTkButton(self.file_sharing_tab, text="Select Download Directory", command=self.select_download_dir).grid(row=3, column=0, padx=10, pady=5)
+            
+            # Add History button
+            history_button = ctk.CTkButton(
+                self.file_sharing_tab, 
+                text="View History", 
+                command=self.show_history
+            )
+            history_button.grid(row=3, column=1, padx=10, pady=5)
 
             # Show friends list when logged in
             friends_frame = ctk.CTkFrame(self.file_sharing_tab, fg_color="gray10")
@@ -497,7 +527,7 @@ class P2PApp:
 
     def get_host_and_port(self):
         """Gets the host and port from the GUI input fields."""
-        host = self.host_entry.get()
+        host = "0.0.0.0"  # Changed from self.host_entry.get()
         try:
             port = int(self.port_entry.get())
             if port < 1 or port > 65535:
